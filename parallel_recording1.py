@@ -257,7 +257,7 @@ def start_browser_and_record1(display_num, url, output_file, screen_size, profil
             browser_process.wait()
 
 
-    # # Список сайтов для обработки с параметрами
+
     # sites = [
     #     {
     #         "url": "https://httpbin.org/absolute-redirect/3",
