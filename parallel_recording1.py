@@ -10,13 +10,19 @@ from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
+
 import tempfile
 from urllib.parse import urlparse, parse_qs
+
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 HTML_OUTPUT_DIR = "/data/html_pages"
+
+# Список для отслеживания активных дисплеев
+active_displays = []
+lock = threading.Lock()  # Для синхронизации доступа к списку
 
 
 # Функция для получения user-agent по типу ОС
@@ -48,11 +54,6 @@ def log_redirects(url):
             if last_path is None or parsed_url.path != last_path:
                 redirects.append({'url': resp.url, 'status': resp.status_code})
                 logging.info(f"Редирект на: {resp.url} со статусом {resp.status_code}")
-            else:
-                if not query_params:  # Если нет параметров, это может быть "реальный" редирект
-                    redirects.append({'url': resp.url, 'status': resp.status_code})
-                    logging.info(f"Редирект на: {resp.url} со статусом {resp.status_code}")
-
             last_path = parsed_url.path
 
         # Логирование финальной страницы
@@ -66,8 +67,6 @@ def log_redirects(url):
     except requests.exceptions.RequestException as e:
         logging.error(f"Ошибка при выполнении запроса: {e}")
         return None, redirects
-
-
 
 
 # Функция для сохранения финальной HTML-страницы
@@ -101,6 +100,23 @@ def setup_driver(screen_size, os_type, proxy=None, profile_dir=None):
     driver = webdriver.Firefox(options=options, service=service)
     driver.set_window_size(screen_size[0], screen_size[1])  # Установка размера окна браузера
     return driver
+
+
+# Функция для поиска свободного нечетного дисплея
+def find_free_display():
+    with lock:
+        for display_num in range(1, 100, 2):  # Проверяем нечетные дисплеи
+            if display_num not in active_displays:
+                active_displays.append(display_num)
+                return display_num
+    return None
+
+
+# Функция для освобождения дисплея
+def release_display(display_num):
+    with lock:
+        if display_num in active_displays:
+            active_displays.remove(display_num)
 
 
 # Функция для запуска браузера и записи экрана
@@ -140,17 +156,20 @@ def start_browser_and_record(display_num, url, screen_size, os_type, proxy, prof
         driver = setup_driver(screen_size, os_type, None, profile_dir)
         driver.get(url)
 
+
         # Проверка готовности страницы
         WebDriverWait(driver, 60).until(lambda d: d.execute_script("return document.readyState") == "complete")
 
+        # Формируем имена файлов на основе доменного имени
+        screenshot_file = f"{output_dir}/{domain_name}.png"
+        print(f'Ошибка в этом url: {url}')
+        page_html = driver.find_element(By.TAG_NAME, 'html')
+        page_html.screenshot(screenshot_file)
+
+        # Запуск второй записи на следующий дисплей
         start_browser_and_record1(display_num * 2, url, output_file, screen_size, profile_dir)
 
         time.sleep(10)
-
-        # Формируем имена файлов на основе доменного имени
-        screenshot_file = f"{output_dir}/{domain_name}.png"
-        page_html = driver.find_element(By.TAG_NAME, 'html')
-        page_html.screenshot(screenshot_file)
 
         logging.info(f"Сохранен скриншот для дисплея :{display_num}: {screenshot_file}")
 
@@ -176,8 +195,11 @@ def start_browser_and_record(display_num, url, screen_size, os_type, proxy, prof
         if 'driver' in locals() and driver:
             driver.quit()
 
+        # Освобождаем дисплей
+        release_display(display_num)
 
-# Функция для запуска браузера и записи экрана
+
+# Функция для запуска браузера и записи экрана на следующий дисплей
 def start_browser_and_record1(display_num, url, output_file, screen_size, profile_dir):
     # Запуск виртуального дисплея с указанным разрешением экрана
     xvfb_process = subprocess.Popen(["Xvfb", f":{display_num}", "-screen", "0", f"{screen_size[0]}x{screen_size[1]}x24"])
@@ -235,38 +257,70 @@ def start_browser_and_record1(display_num, url, output_file, screen_size, profil
             browser_process.wait()
 
 
-# Основной блок программы
+    # # Список сайтов для обработки с параметрами
+    # sites = [
+    #     {
+    #         "url": "https://httpbin.org/absolute-redirect/3",
+    #         "screen_size": (390, 844),
+    #         "os_type": "linux",
+    #         "proxy": None
+    #     },
+    #     {
+    #         "url": "http://github.com/Markitosik",
+    #         "screen_size": (800, 600),
+    #         "os_type": "windows",
+    #         "proxy": None
+    #     },
+    # ]
+
+
+# Функция для ввода задач пользователем одной строкой
+def task_input_loop():
+        print("Пример ввода задачи: https://example.com 800x600 linux")
+        print("Пример ввода с прокси: https://example.com 800x600 linux 123.45.67.89:8080")
+        print("Введите 'exit' для завершения.")
+
+        while True:
+            # Получаем входные данные от пользователя
+            task_input = input("Введите задачу (URL размер экрана ОС прокси): ")
+            if task_input.lower() == "exit":
+                break
+
+            # Разделяем строку на параметры
+            task_parts = task_input.split()
+
+            # Проверяем минимальное количество параметров (URL, размер экрана, ОС)
+            if len(task_parts) < 3:
+                print("Недостаточно данных, попробуйте снова.")
+                continue
+
+            url = task_parts[0]
+            screen_size_input = task_parts[1]
+            os_type = task_parts[2]
+            proxy = task_parts[3] if len(task_parts) == 4 else None  # Прокси - необязательный параметр
+
+            try:
+                screen_size = tuple(map(int, screen_size_input.split('x')))
+            except ValueError:
+                print("Неверный формат размера экрана, попробуйте снова.")
+                continue
+
+            profile_dir = tempfile.mkdtemp()
+
+            # Поиск свободного нечетного дисплея
+            display_num = find_free_display()
+            if display_num is None:
+                print("Нет доступных дисплеев, попробуйте позже.")
+                continue
+
+            # Запуск задачи в отдельном потоке
+            thread = threading.Thread(
+                target=start_browser_and_record,
+                args=(display_num, url, screen_size, os_type, proxy, profile_dir)
+            )
+            thread.start()
+
+
 if __name__ == "__main__":
-    # Список сайтов для обработки с параметрами
-    sites = [
-        {
-            "url": "https://httpbin.org/absolute-redirect/3",
-            "screen_size": (390, 844),
-            "os_type": "linux",
-            "proxy": None
-        },
-        {
-            "url": "http://github.com/Markitosik",
-            "screen_size": (800, 600),
-            "os_type": "windows",
-            "proxy": None
-        },
-    ]
-
-    # Создание и запуск потоков для каждого сайта
-    threads = []
-    for i, site in enumerate(sites):
-        profile_dir = tempfile.mkdtemp()
-        display_num = 2 * i + 1  # Используем нечетные номера дисплеев для первого дисплея
-        thread = threading.Thread(
-            target=start_browser_and_record,
-            args=(display_num, site["url"], site["screen_size"], site["os_type"], site["proxy"], profile_dir)
-        )
-        threads.append(thread)
-        thread.start()
-
-
-    for thread in threads:
-        thread.join()
-
-    logging.info("Запись завершена для всех дисплеев.")
+    # Запуск режима ввода задач
+    task_input_loop()
