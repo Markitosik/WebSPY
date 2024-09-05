@@ -322,5 +322,5 @@ def task_input_loop():
 
 
 if __name__ == "__main__":
-    # Запуск режима ввода задач
+
     task_input_loop()
