@@ -10,11 +10,11 @@ from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from croniter import croniter  # Для парсинга cron-выражений
+from croniter import croniter
 from datetime import datetime
 import tempfile
 from urllib.parse import urlparse, parse_qs
-from zipfile import ZipFile  # Не забываем, что вы используете ZipFile
+from zipfile import ZipFile
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -235,8 +235,8 @@ def start_browser_and_record1(display_num, url, output_file, screen_size, profil
             time.sleep(1)
 
         print(f"Останавливаем запись на дисплее :{display_num}")
-        ffmpeg_process.terminate()  # Завершение записи
-        ffmpeg_process.wait()  # Ждем завершения
+        ffmpeg_process.terminate()
+        ffmpeg_process.wait()
 
         # Считывание и вывод журнала ffmpeg для отладки
         out, _ = ffmpeg_process.communicate()
@@ -305,7 +305,7 @@ def run_scheduled_tasks():
                 else:
                     logging.warning("Нет доступных дисплеев для выполнения задачи.")
 
-        time.sleep(5)  # Проверяем каждую минуту
+        time.sleep(5)
 
 
 # Чтение задач из файла
