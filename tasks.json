@@ -1,0 +1,16 @@
+[
+    {
+        "url": "https://example.com",
+        "screen_size": "1920x1080",
+        "os_type": "windows",
+        "proxy": null,
+        "schedule": "* * * * *"
+    },
+    {
+        "url": "https://github.com/Markitosik",
+        "screen_size": "1366x768",
+        "os_type": "linux",
+        "proxy": null,
+        "schedule": "*/4 * * * *"
+    }
+]

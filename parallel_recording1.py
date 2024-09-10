@@ -1,4 +1,4 @@
-from zipfile import ZipFile
+import json
 import subprocess
 import threading
 import time
@@ -10,10 +10,11 @@ from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-
+from croniter import croniter  # Для парсинга cron-выражений
+from datetime import datetime
 import tempfile
 from urllib.parse import urlparse, parse_qs
-
+from zipfile import ZipFile  # Не забываем, что вы используете ZipFile
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -156,22 +157,18 @@ def start_browser_and_record(display_num, url, screen_size, os_type, proxy, prof
         driver = setup_driver(screen_size, os_type, None, profile_dir)
         driver.get(url)
 
-
         # Проверка готовности страницы
         WebDriverWait(driver, 60).until(lambda d: d.execute_script("return document.readyState") == "complete")
 
         # Формируем имена файлов на основе доменного имени
         screenshot_file = f"{output_dir}/{domain_name}.png"
-        print(f'Ошибка в этом url: {url}')
         page_html = driver.find_element(By.TAG_NAME, 'html')
         page_html.screenshot(screenshot_file)
 
-        # Запуск второй записи на следующий дисплей
-        start_browser_and_record1(display_num * 2, url, output_file, screen_size, profile_dir)
-
-        time.sleep(10)
-
         logging.info(f"Сохранен скриншот для дисплея :{display_num}: {screenshot_file}")
+
+        # Вызов следующей функции записи (на втором дисплее)
+        start_browser_and_record1(display_num * 2, url, output_file, screen_size, profile_dir)
 
         # Архивирование файлов
         archive_file = f"{output_dir}/{domain_name}.zip"
@@ -257,70 +254,66 @@ def start_browser_and_record1(display_num, url, output_file, screen_size, profil
             browser_process.wait()
 
 
+# Функция для планирования задач по cron-расписанию
+def schedule_tasks():
+    tasks = read_tasks()
+    task_schedules = []
 
-    # sites = [
-    #     {
-    #         "url": "https://httpbin.org/absolute-redirect/3",
-    #         "screen_size": (390, 844),
-    #         "os_type": "linux",
-    #         "proxy": None
-    #     },
-    #     {
-    #         "url": "http://github.com/Markitosik",
-    #         "screen_size": (800, 600),
-    #         "os_type": "windows",
-    #         "proxy": None
-    #     },
-    # ]
+    for task in tasks:
+        cron_expression = task.get("schedule")
+        schedule_iter = croniter(cron_expression, datetime.now())
+        next_run_time = schedule_iter.get_next(datetime)
+        task_schedules.append((task, next_run_time))
+
+    return task_schedules
 
 
-# Функция для ввода задач пользователем одной строкой
-def task_input_loop():
-        print("Пример ввода задачи: https://example.com 800x600 linux")
-        print("Пример ввода с прокси: https://example.com 800x600 linux 123.45.67.89:8080")
-        print("Введите 'exit' для завершения.")
+# Функция для запуска задач по расписанию
+def run_scheduled_tasks():
+    # Хранение времени следующего запуска для каждой задачи
+    task_schedules = schedule_tasks()
 
-        while True:
-            # Получаем входные данные от пользователя
-            task_input = input("Введите задачу (URL размер экрана ОС прокси): ")
-            if task_input.lower() == "exit":
-                break
+    while True:
+        current_time = datetime.now()
+        print(f'текущее время {current_time}')
 
-            # Разделяем строку на параметры
-            task_parts = task_input.split()
+        for i, (task, next_run_time) in enumerate(task_schedules):
+            print(f'время запуска {next_run_time}')
+            if current_time >= next_run_time:
+                logging.info(f"Выполнение задачи: {task['url']}")
 
-            # Проверяем минимальное количество параметров (URL, размер экрана, ОС)
-            if len(task_parts) < 3:
-                print("Недостаточно данных, попробуйте снова.")
-                continue
+                # Поиск свободного дисплея
+                display_num = find_free_display()
+                if display_num is not None:
+                    # Запуск задачи в отдельном потоке
+                    threading.Thread(target=start_browser_and_record, args=(
+                        display_num,
+                        task['url'],
+                        tuple(map(int, task['screen_size'].split('x'))),
+                        task['os_type'],
+                        task.get('proxy'),
+                        tempfile.mkdtemp()
+                    )).start()
 
-            url = task_parts[0]
-            screen_size_input = task_parts[1]
-            os_type = task_parts[2]
-            proxy = task_parts[3] if len(task_parts) == 4 else None  # Прокси - необязательный параметр
+                    # Пересчёт следующего времени выполнения
+                    cron_expression = task.get("schedule")
+                    schedule_iter = croniter(cron_expression, current_time)
+                    next_run_time = schedule_iter.get_next(datetime)
 
-            try:
-                screen_size = tuple(map(int, screen_size_input.split('x')))
-            except ValueError:
-                print("Неверный формат размера экрана, попробуйте снова.")
-                continue
+                    # Обновляем время запуска для этой задачи
+                    task_schedules[i] = (task, next_run_time)
+                else:
+                    logging.warning("Нет доступных дисплеев для выполнения задачи.")
 
-            profile_dir = tempfile.mkdtemp()
+        time.sleep(5)  # Проверяем каждую минуту
 
-            # Поиск свободного нечетного дисплея
-            display_num = find_free_display()
-            if display_num is None:
-                print("Нет доступных дисплеев, попробуйте позже.")
-                continue
 
-            # Запуск задачи в отдельном потоке
-            thread = threading.Thread(
-                target=start_browser_and_record,
-                args=(display_num, url, screen_size, os_type, proxy, profile_dir)
-            )
-            thread.start()
+# Чтение задач из файла
+def read_tasks():
+    with open("tasks.json", "r") as file:
+        tasks = json.load(file)
+    return tasks
 
 
 if __name__ == "__main__":
-
-    task_input_loop()
+    run_scheduled_tasks()

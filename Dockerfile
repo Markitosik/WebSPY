@@ -24,8 +24,8 @@ RUN GECKODRIVER_VERSION=$(curl -s https://api.github.com/repos/mozilla/geckodriv
     tar -xzf /tmp/geckodriver.tar.gz -C /usr/local/bin && \
     rm /tmp/geckodriver.tar.gz
 
-# Установка Python-библиотек, включая Selenium и Requests
-RUN pip3 install selenium requests
+# Установка Python-библиотек, включая Selenium, Requests и croniter
+RUN pip3 install selenium requests croniter
 
 # Установка переменной окружения для дисплея
 ENV DISPLAY=:1
@@ -40,6 +40,9 @@ RUN mkdir -p /data
 
 # Копирование скрипта в контейнер
 COPY parallel_recording1.py /parallel_recording1.py
+
+# Копирование файла tasks.json в контейнер
+COPY tasks.json /tasks.json
 
 # Запуск скрипта автоматически при старте контейнера
 CMD ["python3", "/parallel_recording1.py"]
